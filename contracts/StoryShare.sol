@@ -4,13 +4,19 @@ pragma solidity ^0.8.9;
 // Uncomment this line to use console.log
 // import "hardhat/console.sol";
 
+library SharedStructs {
+    struct Author {
+        address addr;
+        bytes32 username;
+        bytes profilePicCID;
+        uint8 reputation;
+    }
+}
+
 contract Story {
     StoryShareInterface StoryShareInst;
     bytes public cid;
-    string public summary;
-    string public genre;
 
-    mapping(address=>Author) public authors;
     mapping(address=>bytes) public bookmarks;
     mapping(bytes => Contribution) public contributions;
     mapping(address => bool) public uniqueVoters;
@@ -20,18 +26,15 @@ contract Story {
     mapping(bytes => address[]) public draftVotes;
     mapping(bytes => address[]) public publishVotes;
 
+    event storylineEvent(Contribution[] storyline);
+    event storylineLeaderEvent(address leader, bytes cid);
+
     enum StorylineState {
         OPEN,
         DRAFTING,
         DRAFTING_END,
         FINAL_REVIEW,
         PUBLISHED
-    }
-
-    struct Author {
-        address addr;
-        bytes32 username;
-        bytes profilePicCID;
     }
 
     struct Contribution {
@@ -46,14 +49,16 @@ contract Story {
 
     Contribution public initialContribution;
 
-    constructor(bytes memory _storyCID, string memory _summary, string memory _genre, StoryShareInterface storyShareInterface) {
+    constructor(bytes memory _storyCID, StoryShareInterface storyShareInterface) {
         cid = _storyCID;
-        summary = _summary;
-        genre = _genre; 
         StoryShareInst = storyShareInterface;
         
         initialContribution = Contribution(msg.sender, _storyCID, "", new bytes[](0), 0, StorylineState.OPEN, address(0x0000000000000000));
     }
+
+    function getDraftVotes(bytes calldata _cid) public view returns (address[] memory draftVoters) {
+        draftVoters = draftVotes[_cid];
+    }   
 
     function bookmark(bytes calldata _cid) external {
         bookmarks[msg.sender] = _cid;
@@ -108,7 +113,7 @@ contract Story {
     }
 
     // selects the author with the most contributions to a storyline as a leader
-    function getStorylineLeader(address[] memory authors) public returns (address leader) {
+    function getStorylineLeader(address[] memory authors, bytes memory cid) public returns (address leader) {
         uint8 maxVotes = 0;
         address maxVoterAddr;
         for (uint8 i=0;i<authors.length;i++){
@@ -126,6 +131,7 @@ contract Story {
             delete authorContribCounts[authors[j]];
         }        
         leader = maxVoterAddr;
+        emit storylineLeaderEvent(leader, cid);
     }
 
     // the leader can submit a draft for a story that is in the drafting stage
@@ -138,6 +144,7 @@ contract Story {
     }
 
     // request to publish a story, which terminates the story with majority vote
+    // If voters do not approve of the final story, then the leader can submit another cid for final review
     function voteToPublish(bytes calldata _cid) external returns (bool isPublished) {
         Contribution memory contribution = contributions[_cid];
         require(contribution.state == StorylineState.FINAL_REVIEW, "can only vote to publish content that is in the final review stage");
@@ -172,7 +179,7 @@ contract Story {
         if (isDrafted) {
             finalContrib.state = StorylineState.DRAFTING;
         }
-        finalContrib.leader = getStorylineLeader(authorsArr);
+        finalContrib.leader = getStorylineLeader(authorsArr, finalContrib.cid);
     }
 
     function getStoryline(bytes calldata _cid) public returns (Contribution[] memory storyline){
@@ -187,6 +194,7 @@ contract Story {
                 break;
             }
         }
+        emit storylineEvent(storyline);
     }
 
     // get the last story that the user wants to return to
@@ -195,7 +203,7 @@ contract Story {
         bookmarkedCID = bookmarks[msg.sender];
     }
 
-    function getContribution(bytes memory _cid) public returns (Contribution memory contribution) {
+    function getContribution(bytes memory _cid) public view returns (Contribution memory contribution) {
         require(contributions[_cid].authorAddr != address(0x0000000000000000), "contribution does not exist");
         contribution = contributions[_cid];
     }
@@ -215,38 +223,60 @@ contract Story {
         }
         prevContrib.nextCIDs.push(cid);
         contribution = Contribution(msg.sender, cid, prevCID, new bytes[](0), prevContrib.contribCount + 1, prevContrib.state, prevContrib.leader);
+        StoryShareInst.updateAuthorRep(prevContrib.authorAddr, 1);
     }
 
 
 }
 
 interface StoryShareInterface {
-    function createStory(bytes memory _storyCID, string memory _summary, string memory _genre) external returns(Story);
-    function getStoryByCID(bytes memory _storyCID) external view returns(Story story);
+    function createStory(bytes memory _storyCID) external returns(Story);
     function setFeaturedStoryCID(bytes memory _storyCID) external;
+    function createAuthor(address addr, bytes32 username, bytes calldata profilePic) external;
+    function getAuthor(address addr) external view returns (SharedStructs.Author memory author);
+    function updateAuthorRep(address addr, uint8 reputationChange) external;
 }
 
 contract StoryShare is StoryShareInterface {
     bytes public featuredStory;
     bool public isFeaturePromoted;
 
+    mapping(address => SharedStructs.Author) public authors;
     mapping(bytes=>address) public stories;
 
     constructor(){
         isFeaturePromoted = false;
     }
 
+    function updateAuthorRep(address addr, uint8 reputationChange) external {
+        SharedStructs.Author storage author = authors[addr];
+        author.reputation += reputationChange;
+    }
+
+    // // for testing purposes
+    // function getAuthorPublic(address addr) public view returns (SharedStructs.Author memory author) {
+    //     author = authors[addr];
+    // }
+
+    function getAuthor(address addr) external view returns (SharedStructs.Author memory author) {
+        author = authors[addr];
+    }
+
+    function createAuthor(address addr, bytes32 username, bytes calldata profilePic) external {
+        require(msg.sender == address(0x0000000000000000), "Cannot create duplicate accounts");        
+        SharedStructs.Author memory author = SharedStructs.Author(addr, username, profilePic, 0);
+        authors[msg.sender] = author;
+    }
+
     // Create a new `Story` contract and return its address.
     function createStory(
-        bytes memory _storyCID, 
-        string memory _summary,
-        string memory _genre
+        bytes memory _storyCID
     )
         external override
         returns (Story story)
     {
         require(stories[_storyCID] == address(0x0000000000000000), 'cannot add a duplicate story cid');
-        story = new Story(_storyCID, _summary, _genre, this);
+        story = new Story(_storyCID, this);
         stories[_storyCID] = address(story);
         if (!isFeaturePromoted){
             featuredStory = _storyCID;
@@ -261,8 +291,14 @@ contract StoryShare is StoryShareInterface {
         featuredStory = _storyCID;
     }
 
+    // // for testing purposes
+    // function getStoryByCIDPublic(bytes memory _storyCID) public view returns (Story story) {
+    //     require(stories[_storyCID] != address(0x0000000000000000), 'the story does not exist');
+    //     story = Story(stories[_storyCID]);
+    // }
+
     //Finds a story by its CID
-    function getStoryByCID(bytes memory _storyCID) external view override returns (Story story) {
+    function getStoryByCID(bytes memory _storyCID) public view returns (Story story) {
         require(stories[_storyCID] != address(0x0000000000000000), 'the story does not exist');
         story = Story(stories[_storyCID]);
     }
