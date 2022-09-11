@@ -1,7 +1,16 @@
 import { ethers } from "hardhat";
 
 async function main() {
-  const StoryShare = await ethers.getContractFactory("StoryShare");
+  const LibraryStorylineFactory = await ethers.getContractFactory("LibraryStoryline");
+  const libraryStoryline = await LibraryStorylineFactory.deploy();
+  await libraryStoryline.deployed();
+  console.log(`LibraryStoryline deployed to ${libraryStoryline.address}`);
+
+  const StoryShare = await ethers.getContractFactory("StoryShare", {
+    libraries: {
+      LibraryStoryline: libraryStoryline.address
+    }
+  });
   const storyShare = await StoryShare.deploy();
 
   await storyShare.deployed();

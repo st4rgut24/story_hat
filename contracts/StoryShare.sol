@@ -2,23 +2,39 @@
 pragma solidity ^0.8.9;
 
 // Uncomment this line to use console.log
-// import "hardhat/console.sol";
+import "hardhat/console.sol";
+import "./SharedStructs.sol";
+import "./LibraryStoryline.sol";
 
-library SharedStructs {
-    struct Author {
-        address addr;
-        bytes32 username;
-        bytes profilePicCID;
-        uint8 reputation;
-    }
-}
+// import LibraryStoryline from “./LibraryStoryline.sol”;
+
+// error codes
+
+// DUPLICATES
+// DA -- duplicate account
+// DC -- duplicate cid
+// DV -- duplicate vote
+// DE -- duplicate entry (cant contribute more than once to a  prev contrib)
+
+// PERMISSIONS
+// PA -- only an author can do this
+// PL -- only leader can do this
+
+// STORYLINE STATUS
+// SF -- must be in FINAL_REVIEW status
+// SO -- must be OPEN status
+
+// DOES NOT EXIST
+// NB -- no bookmark exists
+// NC -- no contribution exists
+// NS -- no story exists
 
 contract Story {
     StoryShareInterface StoryShareInst;
     bytes public cid;
 
     mapping(address=>bytes) public bookmarks;
-    mapping(bytes => Contribution) public contributions;
+    mapping(bytes => SharedStructs.Contribution) public contributions;
     mapping(address => bool) public uniqueVoters;
 
     mapping(address => uint8) public authorContribCounts;
@@ -26,166 +42,53 @@ contract Story {
     mapping(bytes => address[]) public draftVotes;
     mapping(bytes => address[]) public publishVotes;
 
-    event storylineEvent(Contribution[] storyline);
-    event storylineLeaderEvent(address leader, bytes cid);
+    event storylineEvent(SharedStructs.Contribution[] storyline);
 
-    enum StorylineState {
-        OPEN,
-        DRAFTING,
-        DRAFTING_END,
-        FINAL_REVIEW,
-        PUBLISHED
-    }
-
-    struct Contribution {
-        address authorAddr;
-        bytes cid;
-        bytes prevCID;
-        bytes[] nextCIDs;
-        uint8 contribCount;
-        StorylineState state;
-        address leader; // TODO: allow the author to transfer leader status to another contributor
-    }
-
-    Contribution public initialContribution;
+    SharedStructs.Contribution public initialContribution;
 
     constructor(bytes memory _storyCID, StoryShareInterface storyShareInterface) {
         cid = _storyCID;
         StoryShareInst = storyShareInterface;
         
-        initialContribution = Contribution(msg.sender, _storyCID, "", new bytes[](0), 0, StorylineState.OPEN, address(0x0000000000000000));
+        initialContribution = SharedStructs.Contribution(msg.sender, _storyCID, "", new bytes[](0), 0, SharedStructs.StorylineState.OPEN, address(0x0000000000000000));
+    }
+
+    function bookmark(bytes calldata _cid) external {
+        bookmarks[msg.sender] = _cid;
     }
 
     function getDraftVotes(bytes calldata _cid) public view returns (address[] memory draftVoters) {
         draftVoters = draftVotes[_cid];
     }   
 
-    function bookmark(bytes calldata _cid) external {
-        bookmarks[msg.sender] = _cid;
-    }
-
-    // get the unique voters from an array using a storage mapping for duplicate checks
-    function setUniqueAuthors(address[] memory voters, bytes calldata _cid) internal returns (address[] memory){        
-        uint8 uniqueCount = 0;
-        for (uint8 j=0;j<voters.length;j++){
-            if (!uniqueVoters[voters[j]]){
-                uniqueCount += 1;
-                uniqueVoters[voters[j]] = true;
-            }
-        }
-        address[] memory uniqueVoterArr = new address[](uniqueCount);
-        uint8 counter = 0;
-        for (uint8 j=0;j<voters.length;j++){
-            if (uniqueVoters[voters[j]]){
-                uniqueVoterArr[counter] = voters[j];
-                // clear the mapping
-                delete uniqueVoters[voters[j]];
-            }
-        }
-        uniqueAuthors[_cid] = uniqueVoterArr;
-        return uniqueVoterArr;
-    }
-
-    // get authors who contributed to a storyline
-    function getStorylineAuthors(Contribution[] memory contributions) internal returns (address[] memory authors) {
-        authors = new address[](contributions.length);
-        for (uint8 i=0;i<contributions.length;i++){
-            authors[i] = contributions[i].authorAddr;
-        }
-    }
-
-    // check whether the voter is valid given their past contributions
-    function authorize(Contribution[] memory storyline, address[] memory authors, bytes calldata _cid, address[] memory votesArr) internal {
-        bool isVoterAuthor = false;
-        for (uint8 i=0;i<authors.length;i++){
-            if (authors[i] == msg.sender){
-                isVoterAuthor = true;
-            }
-            else if (i == storyline.length - 1 && !isVoterAuthor){
-                revert("A non-author cannot vote to close a storyline");
-            }
-        }
-        for (uint8 j=0;j<votesArr.length;j++){
-            if (votesArr[j] == msg.sender){
-                revert("can't vote to close a storyline more than once");
-            }            
-        }
-    }
-
-    // selects the author with the most contributions to a storyline as a leader
-    function getStorylineLeader(address[] memory authors, bytes memory cid) public returns (address leader) {
-        uint8 maxVotes = 0;
-        address maxVoterAddr;
-        for (uint8 i=0;i<authors.length;i++){
-            address author = authors[i];
-            uint8 contribCount = authorContribCounts[author];
-            uint8 updatedContribCount = contribCount + 1;
-            authorContribCounts[author] = updatedContribCount;
-            if (updatedContribCount > maxVotes) {
-                maxVotes = updatedContribCount;
-                maxVoterAddr = author;
-            }
-        }
-        // clear the mapping for reuse
-        for (uint8 j=0;j<authors.length;j++){
-            delete authorContribCounts[authors[j]];
-        }        
-        leader = maxVoterAddr;
-        emit storylineLeaderEvent(leader, cid);
-    }
-
     // the leader can submit a draft for a story that is in the drafting stage
     function publishDraft(bytes memory _prevCID, bytes calldata _finalDraftCID) external {
-        Contribution memory finalContrib = contributions[_prevCID];
-        require(finalContrib.leader == msg.sender, "only the leader can publish the final draft for a story");
-        finalContrib.state = StorylineState.DRAFTING_END;
-        Contribution memory storyContrib = contribute(_finalDraftCID, _prevCID);
-        storyContrib.state = StorylineState.FINAL_REVIEW;
+        SharedStructs.Contribution memory finalContrib = contributions[_prevCID];
+        require(finalContrib.leader == msg.sender, "PL");
+        finalContrib.state = SharedStructs.StorylineState.DRAFTING_END;
+        SharedStructs.Contribution memory storyContrib = contribute(_finalDraftCID, _prevCID);
+        storyContrib.state = SharedStructs.StorylineState.FINAL_REVIEW;
     }
 
-    // request to publish a story, which terminates the story with majority vote
-    // If voters do not approve of the final story, then the leader can submit another cid for final review
+    // // request to publish a story, which terminates the story with majority vote
+    // // If voters do not approve of the final story, then the leader can submit another cid for final review
     function voteToPublish(bytes calldata _cid) external returns (bool isPublished) {
-        Contribution memory contribution = contributions[_cid];
-        require(contribution.state == StorylineState.FINAL_REVIEW, "can only vote to publish content that is in the final review stage");
-        Contribution[] memory storyline = getStoryline(_cid);
-        address[] memory authors = getStorylineAuthors(storyline);
-        address[] storage publishVotesArr = publishVotes[_cid];
-        authorize(storyline, authors, _cid, publishVotesArr);
-        address[] memory uniqueAuthorsTotal = uniqueAuthors[_cid];
-        isPublished = publishVotesArr.length > uniqueAuthorsTotal.length / 2;
-        if (isPublished) {
-            contribution.state = StorylineState.PUBLISHED;
-        }
+        SharedStructs.Contribution storage contribution = contributions[_cid];
+        SharedStructs.Contribution[] memory storyline = getStoryline(_cid);
+        isPublished = LibraryStoryline.voteToPublish(uniqueAuthors, publishVotes, contribution, storyline, _cid);
     }
 
-    // request to close a story to submissions, and sends story to drafting phase with majority vote
+    // // request to close a story to submissions, and sends story to drafting phase with majority vote
     function voteToDraft(bytes calldata _cid) external returns (bool isDrafted) {
-        Contribution[] memory storyline = getStoryline(_cid);
-        address[] memory authorsArr = getStorylineAuthors(storyline);
-        address[] storage draftVotesArr = draftVotes[_cid];
-        authorize(storyline, authorsArr, _cid, draftVotesArr);
-        
-        bool isFirstToVote = draftVotesArr.length == 0;
-        draftVotesArr.push(msg.sender);
-        // if this is the first vote on a story, set its unique authors
-        if (isFirstToVote) {
-            setUniqueAuthors(authorsArr, _cid);
-        }
-        address[] memory uniqueAuthorsTotal = uniqueAuthors[_cid];
-        isDrafted = draftVotesArr.length > uniqueAuthorsTotal.length / 2;
-        Contribution memory finalContrib = storyline[storyline.length - 1];
-
-        if (isDrafted) {
-            finalContrib.state = StorylineState.DRAFTING;
-        }
-        finalContrib.leader = getStorylineLeader(authorsArr, finalContrib.cid);
+        SharedStructs.Contribution storage contribution = contributions[_cid];
+        SharedStructs.Contribution[] memory storyline = getStoryline(_cid);
+       isDrafted = LibraryStoryline.voteToDraft(authorContribCounts, uniqueAuthors, uniqueVoters, draftVotes, storyline, contribution, _cid);
     }
 
-    function getStoryline(bytes calldata _cid) public returns (Contribution[] memory storyline){
-        Contribution memory contribution = getContribution(_cid);
+    function getStoryline(bytes calldata _cid) public returns (SharedStructs.Contribution[] memory storyline){
+        SharedStructs.Contribution memory contribution = getContribution(_cid);
         uint8 contribLength = contribution.contribCount;
-        storyline = new Contribution[](contribLength);
+        storyline = new SharedStructs.Contribution[](contribLength);
         uint8 idx = contribLength - 1;
         while(idx >= 0){
             storyline[idx] = contribution;
@@ -199,34 +102,38 @@ contract Story {
 
     // get the last story that the user wants to return to
     function getSavedCID() external returns (bytes memory bookmarkedCID) {
-        require(bookmarks[msg.sender].length != 0, "user has not saved any bookmarks");
+        require(bookmarks[msg.sender].length != 0, "NB");
         bookmarkedCID = bookmarks[msg.sender];
     }
 
-    function getContribution(bytes memory _cid) public view returns (Contribution memory contribution) {
-        require(contributions[_cid].authorAddr != address(0x0000000000000000), "contribution does not exist");
+    function getContribution(bytes memory _cid) public view returns (SharedStructs.Contribution memory contribution) {
+        require(contributions[_cid].authorAddr != address(0x0000000000000000), "NC");
         contribution = contributions[_cid];
     }
 
     // contribute to a story 
-    function contribute(bytes calldata cid, bytes memory prevCID) public returns (Contribution memory contribution) {
-        require(contributions[cid].authorAddr == address(0x0000000000000000), "cannot resubmit the same content");
-        Contribution storage prevContrib = contributions[prevCID];
-        require(prevContrib.authorAddr != address(0x0000000000000000), "previous contribution does not exist");
-        require(prevContrib.state == StorylineState.OPEN, "the storyline has been closed");
-        bytes32 ownCidHash = keccak256(cid);
-        for (uint256 i=0;i<prevContrib.nextCIDs.length;i++){
-            bytes memory nextCID = prevContrib.nextCIDs[i];
-            if (keccak256((nextCID)) == ownCidHash){
-                revert("cannot submit more than one entry to a contribution");
+    function contribute(bytes calldata cid, bytes memory prevCID) public returns (SharedStructs.Contribution memory contribution) {
+        require(contributions[cid].authorAddr == address(0x0000000000000000), "DC");
+        SharedStructs.Contribution storage prevContrib = contributions[prevCID];
+        if (prevCID.length != 0){
+            require(prevContrib.authorAddr != address(0x0000000000000000), "NC");
+            require(prevContrib.state == SharedStructs.StorylineState.OPEN, "NO");
+            bytes32 ownCidHash = keccak256(cid);
+            for (uint256 i=0;i<prevContrib.nextCIDs.length;i++){
+                bytes memory nextCID = prevContrib.nextCIDs[i];
+                if (keccak256((nextCID)) == ownCidHash){
+                    revert("DE");
+                }
             }
+            prevContrib.nextCIDs.push(cid);
+            // StoryShareInst.updateAuthorRep(prevContrib.authorAddr, 1);
+            contribution = SharedStructs.Contribution(msg.sender, cid, prevCID, new bytes[](0), prevContrib.contribCount + 1, prevContrib.state, prevContrib.leader);
         }
-        prevContrib.nextCIDs.push(cid);
-        contribution = Contribution(msg.sender, cid, prevCID, new bytes[](0), prevContrib.contribCount + 1, prevContrib.state, prevContrib.leader);
-        StoryShareInst.updateAuthorRep(prevContrib.authorAddr, 1);
+        else { // the root contribution
+            contribution = SharedStructs.Contribution(msg.sender, cid, "", new bytes[](0), 0, SharedStructs.StorylineState.OPEN, address(0x0000000000000000));
+        }
+        contributions[cid] = contribution;
     }
-
-
 }
 
 interface StoryShareInterface {
@@ -263,7 +170,7 @@ contract StoryShare is StoryShareInterface {
     }
 
     function createAuthor(address addr, bytes32 username, bytes calldata profilePic) external {
-        require(msg.sender == address(0x0000000000000000), "Cannot create duplicate accounts");        
+        require(msg.sender == address(0x0000000000000000), "DA");        
         SharedStructs.Author memory author = SharedStructs.Author(addr, username, profilePic, 0);
         authors[msg.sender] = author;
     }
@@ -275,7 +182,7 @@ contract StoryShare is StoryShareInterface {
         external override
         returns (Story story)
     {
-        require(stories[_storyCID] == address(0x0000000000000000), 'cannot add a duplicate story cid');
+        require(stories[_storyCID] == address(0x0000000000000000), 'DC');
         story = new Story(_storyCID, this);
         stories[_storyCID] = address(story);
         if (!isFeaturePromoted){
@@ -299,7 +206,7 @@ contract StoryShare is StoryShareInterface {
 
     //Finds a story by its CID
     function getStoryByCID(bytes memory _storyCID) public view returns (Story story) {
-        require(stories[_storyCID] != address(0x0000000000000000), 'the story does not exist');
+        require(stories[_storyCID] != address(0x0000000000000000), 'NS');
         story = Story(stories[_storyCID]);
     }
 }
