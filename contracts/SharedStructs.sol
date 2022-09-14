@@ -25,5 +25,12 @@ library SharedStructs {
         uint8 contribCount;
         StorylineState state;
         address leader; // TODO: allow the author to transfer leader status to another contributor
+    }
+
+    struct StoryDetails {
+        bytes cid;
+        string title;
+        string summary;
+        bytes32 genre;
     }    
 }

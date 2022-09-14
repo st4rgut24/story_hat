@@ -11,11 +11,17 @@ async function main() {
       LibraryStoryline: libraryStoryline.address
     }
   });
+  
   const storyShare = await StoryShare.deploy();
 
   await storyShare.deployed();
 
   console.log(`StoryShare deployed to ${storyShare.address}`);
+
+
+  const Greeter = await ethers.getContractFactory("Greeter");  
+  const greeter = await Greeter.deploy("poo");
+  await greeter.deployed();
 }
 
 // We recommend this pattern to be able to use async/await everywhere
