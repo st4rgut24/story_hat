@@ -2,7 +2,7 @@
 pragma solidity ^0.8.9;
 
 // Uncomment this line to use console.log
-// import "hardhat/console.sol";
+import "hardhat/console.sol";
 import "./SharedStructs.sol";
 import "./LibraryStoryline.sol";
 
@@ -63,18 +63,18 @@ contract Story {
 
     // the leader can submit a draft for a story that is in the drafting stage
     function publishDraft(bytes memory _prevCID, bytes calldata _finalDraftCID) external {
-        LibraryStoryline.publishDraft(contributions, _prevCID, _finalDraftCID);
+        LibraryStoryline.publishDraft(contributions, _prevCID, _finalDraftCID, tx.origin);
     }
 
     // // request to publish a story, which terminates the story with majority vote
     // // If voters do not approve of the final story, then the leader can submit another cid for final review
     function voteToPublish(bytes calldata _cid) external returns (bool isPublished) {
-        isPublished = LibraryStoryline.voteToPublish(contributions, uniqueAuthors, publishVotes, _cid);
+        isPublished = LibraryStoryline.voteToPublish(contributions, uniqueAuthors, publishVotes, _cid, tx.origin);
     }
 
     // // request to close a story to submissions, and sends story to drafting phase with majority vote
     function voteToDraft(bytes calldata _cid) external returns (bool isDrafted) {
-       isDrafted = LibraryStoryline.voteToDraft(contributions, authorContribCounts, uniqueAuthors, uniqueVoters, draftVotes, _cid);
+       isDrafted = LibraryStoryline.voteToDraft(contributions, authorContribCounts, uniqueAuthors, uniqueVoters, draftVotes, _cid, tx.origin);
     }
 
     function getContribution(bytes memory _cid) public view returns (SharedStructs.Contribution memory contribution) {
@@ -88,7 +88,7 @@ contract Story {
 
     // contribute to a story 
     function contribute(bytes memory cid, bytes memory prevCID) public returns (SharedStructs.Contribution memory contribution) {
-        contribution = LibraryStoryline.contribute(contributions, cid, prevCID);
+        contribution = LibraryStoryline.contribute(contributions, cid, prevCID, tx.origin);
         // RESTORE once you figure out how to reduce contract size
         // SharedStructs.Contribution memory prevContrib = getContribution(contribution.prevCID);
         // if (prevContrib.authorAddr != address(0x0000000000000000))
@@ -125,13 +125,13 @@ contract StoryShare is StoryShareInterface {
     }
 
     function bookmark(bytes calldata _cid) external {
-        bookmarks[msg.sender] = _cid;
+        bookmarks[tx.origin] = _cid;
     }
 
     // get the last story that the user wants to return to
     function getBookmark() external returns (bytes memory bookmarkedCID) {
-        require(bookmarks[msg.sender].length != 0, "NB");
-        bookmarkedCID = bookmarks[msg.sender];
+        require(bookmarks[tx.origin].length != 0, "NB");
+        bookmarkedCID = bookmarks[tx.origin];
     }
 
     function getAuthor(address addr) external view returns (SharedStructs.Author memory author) {
@@ -139,9 +139,9 @@ contract StoryShare is StoryShareInterface {
     }
 
     function createAuthor(address addr, bytes32 username, bytes calldata profilePic) external {
-        require(msg.sender == address(0x0000000000000000), "DA");        
+        require(tx.origin == address(0x0000000000000000), "DA");        
         SharedStructs.Author memory author = SharedStructs.Author(addr, username, profilePic, 0);
-        authors[msg.sender] = author;
+        authors[tx.origin] = author;
     }
 
     // Create a new `Story` contract and return its address.

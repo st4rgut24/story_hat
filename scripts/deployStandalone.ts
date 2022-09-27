@@ -1,6 +1,6 @@
 import { ethers } from "hardhat";
 
-export async function deploy() {
+async function main() {
 
   console.log("Deploying Library Storyline contract");
   
@@ -26,9 +26,9 @@ export async function deploy() {
   return storyShare.address;
 }
 
-// // We recommend this pattern to be able to use async/await everywhere
-// // and properly handle errors.
-// main().catch((error) => {
-//   console.error(error);
-//   process.exitCode = 1;
-// });
+// We recommend this pattern to be able to use async/await everywhere
+// and properly handle errors.
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

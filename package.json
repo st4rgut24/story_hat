@@ -13,6 +13,7 @@
     "hardhat": "^2.11.1"
   },
   "dependencies": {
+    "@chakra-ui/react": "^2.3.2",
     "@nomiclabs/hardhat-ethers": "^2.1.1",
     "hardhat-contract-sizer": "^2.6.1"
   }

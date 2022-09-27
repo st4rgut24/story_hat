@@ -12,7 +12,6 @@ library SharedStructs {
     enum StorylineState {
         OPEN,
         DRAFTING,
-        DRAFTING_END,
         FINAL_REVIEW,
         PUBLISHED
     }
